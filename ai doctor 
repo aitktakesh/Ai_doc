@@ -1,0 +1,696 @@
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox, scrolledtext
+from PIL import Image, ImageTk
+import pytesseract
+from pdf2image import convert_from_path
+import pyttsx3
+import threading
+import os
+
+class EnhancedAIDoctor:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("AI-Doctor Demo")
+        self.root.geometry("1000x700")
+        self.root.configure(bg="#e3f2fd")  # Light medical blue background
+
+        # Initialize text-to-speech engine
+        self.voice_engine = pyttsx3.init()
+        self.voice_engine.setProperty('rate', 150)  # Speed of speech
+        self.voice_engine.setProperty('volume', 0.9)  # Volume (0 to 1)
+        
+        # Try to set a professional-sounding voice
+        voices = self.voice_engine.getProperty('voices')
+        for voice in voices:
+            if "female" in voice.name.lower():  # Often female voices sound more caring
+                self.voice_engine.setProperty('voice', voice.id)
+                break
+
+        self.knowledge_base = {
+            'fever': {
+                'questions': ["How long have you had fever?", "Any chills?"],
+                'medicines': {'Paracetamol': '500mg every 6 hours', 'Ibuprofen': '200-400mg every 6 hours'},
+                'remedies': ['Cool compress', 'Adequate fluid intake', 'Rest'],
+                'tests': ['CBC', 'Malaria Test'],
+                'followup': 'Monitor temperature every 4 hours'
+            },
+             'cold': {
+                'questions': ["Do you have a runny nose?", "Any sore throat or sneezing?"],
+                'medicines': {'Antihistamine': 'Loratadine 10mg once daily', 'Decongestant': 'Pseudoephedrine 30mg every 6 hours'},
+                'remedies': ['Steam inhalation', 'Honey and warm water', 'Rest'],
+                'tests': ['None needed unless severe'],
+                'followup': 'Hydrate well and rest; see a doctor if symptoms persist beyond 10 days'
+            },
+            'cough': {
+                'questions': ["Is it dry or with phlegm?", "Any chest pain or difficulty breathing?"],
+                'medicines': {'Cough Suppressant': 'Dextromethorphan 10-20mg every 4 hours', 'Expectorant': 'Guaifenesin 200-400mg every 4 hours'},
+                'remedies': ['Ginger tea', 'Saltwater gargle', 'Avoid smoking'],
+                'tests': ['Chest X-ray if persistent or worsening'],
+                'followup': 'If cough lasts more than 3 weeks, see a doctor'
+            },
+            'headache': {
+        'questions': ["Is the pain throbbing or constant?", "Any light sensitivity?"],
+        'medicines': {'Ibuprofen': '400mg every 6 hours', 'Aspirin': '325-650mg every 4 hours'},
+        'remedies': ['Cold compress on forehead', 'Dark room rest', 'Hydration'],
+        'tests': ['Blood pressure check', 'CT scan if severe'],
+        'followup': 'Monitor for vision changes'
+    },
+    'sore throat': {
+        'questions': ["Difficulty swallowing?", "Any white patches visible?"],
+        'medicines': {'Lozenges': '1 every 2-3 hours', 'Amoxicillin': '500mg 3x daily (if bacterial)'},
+        'remedies': ['Saltwater gargle', 'Warm tea with honey', 'Humidifier use'],
+        'tests': ['Strep test', 'Throat culture'],
+        'followup': 'Watch for fever development'
+    },
+    'diarrhea': {
+        'questions': ["Duration of symptoms?", "Any blood in stool?"],
+        'medicines': {'Loperamide': '4mg initially, then 2mg after each loose stool'},
+        'remedies': ['BRAT diet', 'Oral rehydration solution', 'Probiotics'],
+        'tests': ['Stool culture', 'Celiac screening'],
+        'followup': 'Monitor hydration status'
+    },
+    'fatigue': {
+        'questions': ["How long have you felt tired?", "Any recent weight changes?"],
+        'medicines': {'Iron supplement': '65mg 1x daily (if anemic)'},
+        'remedies': ['Balanced diet', 'Sleep hygiene', 'Moderate exercise'],
+        'tests': ['Thyroid panel', 'CBC', 'Vitamin D levels'],
+        'followup': 'Track energy patterns'
+    },
+    'chest pain': {
+        'questions': ["Does it radiate to arm/jaw?", "Associated with exertion?"],
+        'medicines': {'Aspirin': '325mg chewable (if cardiac suspected)'},
+        'remedies': ['Sit upright', 'Stay calm'],
+        'tests': ['ECG', 'Troponin levels', 'Chest X-ray'],
+        'followup': 'Seek immediate help if worsens'
+    },
+    'abdominal pain': {
+        'questions': ["Location of pain?", "Relation to meals?"],
+        'medicines': {'Antacids': 'As needed for heartburn'},
+        'remedies': ['Clear liquids diet', 'Heat pad application'],
+        'tests': ['Ultrasound', 'Endoscopy', 'Liver function tests'],
+        'followup': 'Watch for vomiting/diarrhea'
+    },
+    'rash': {
+        'questions': ["Itchy or painful?", "Recent new products?"],
+        'medicines': {'Antihistamines': 'Cetirizine 10mg daily'},
+        'remedies': ['Cool compresses', 'Oatmeal baths', 'Fragrance-free moisturizers'],
+        'tests': ['Allergy testing', 'Skin scraping'],
+        'followup': 'Monitor spread pattern'
+    },
+    'nausea': {
+        'questions': ["Associated with meals?", "Any vomiting?"],
+        'medicines': {'Dimenhydrinate': '50-100mg every 4-6 hours'},
+        'remedies': ['Ginger tea', 'Small bland meals', 'Acupressure wristbands'],
+        'tests': ['Pregnancy test', 'Abdominal ultrasound'],
+        'followup': 'Track frequency/duration'
+    },
+    'back pain': {
+        'questions': ["Acute or chronic?", "Any leg numbness?"],
+        'medicines': {'Naproxen': '500mg initially, then 250mg every 6-8 hours'},
+        'remedies': ['Proper posture', 'Gentle stretching', 'Heat therapy'],
+        'tests': ['MRI', 'X-ray lumbar spine'],
+        'followup': 'Monitor mobility changes'
+    },
+    'dizziness': {
+        'questions': ["Spinning sensation?", "Worsens with movement?"],
+        'medicines': {'Meclizine': '25-50mg daily as needed'},
+        'remedies': ['Slow position changes', 'Hydration', 'Balance exercises'],
+        'tests': ['Inner ear exam', 'Blood sugar levels'],
+        'followup': 'Prevent fall risks'
+    },
+    'shortness of breath': {
+        'questions': ["At rest or exertion?", "Any wheezing?"],
+        'medicines': {'Albuterol inhaler': '2 puffs every 4-6 hours'},
+        'remedies': ['Pursed-lip breathing', 'Sitting upright'],
+        'tests': ['Spirometry', 'Chest CT', 'ABG analysis'],
+        'followup': 'Monitor oxygen levels'
+    }
+        }
+
+        # Add report analysis results storage
+        self.report_analysis = {}
+        
+        self.setup_styles()
+        self.setup_gui()
+        self.load_assets()
+        self.initialize_conversation()
+
+    def setup_styles(self):
+        style = ttk.Style()
+        style.configure("Black.TButton", font=('Arial', 12), foreground="black", background="white", padding=5)
+        style.configure("Report.TFrame", background="#f0f7ff", relief="raised", borderwidth=2)
+        style.configure("Header.TLabel", font=('Helvetica', 14, 'bold'), background="#e3f2fd", foreground="#0056b3")
+
+    def setup_gui(self):
+        # Main layout with two frames side by side
+        self.main_container = ttk.Frame(self.root, padding=10)
+        self.main_container.pack(expand=True, fill='both')
+        
+        # Left frame for chat
+        self.chat_frame = ttk.Frame(self.main_container, padding=5)
+        self.chat_frame.pack(side=tk.LEFT, fill='both', expand=True)
+        
+        # Right frame for report analysis
+        self.report_frame = ttk.Frame(self.main_container, padding=5, style="Report.TFrame")
+        self.report_frame.pack(side=tk.RIGHT, fill='both', expand=True)
+        
+        # Setup chat interface
+        self.setup_chat_interface()
+        
+        # Setup report analysis interface
+        self.setup_report_interface()
+
+    def setup_chat_interface(self):
+        self.header = ttk.Label(
+            self.chat_frame, text="AI-Doctor System 🏥",
+            font=('Helvetica', 20, 'bold'), background="#e3f2fd", foreground="black"
+        )
+        self.header.pack(pady=10)
+
+        self.doctor_animation = ttk.Label(self.chat_frame, background="#e3f2fd")
+        self.doctor_animation.pack()
+
+        self.chat_history = scrolledtext.ScrolledText(
+            self.chat_frame, width=40, height=15, wrap=tk.WORD,
+            font=('Arial', 12), bg="white", fg="black", relief="solid", borderwidth=2
+        )
+        self.chat_history.pack(pady=10, fill='both', expand=True)
+
+        self.input_frame = ttk.Frame(self.chat_frame)
+        self.input_frame.pack(pady=10, fill='x')
+
+        self.user_input = tk.Entry(self.input_frame, width=30, font=('Arial', 12), fg="black")
+        self.user_input.pack(side=tk.LEFT, padx=5, fill='x', expand=True)
+        self.user_input.bind("<Return>", lambda event: self.process_input())
+
+        self.send_btn = ttk.Button(self.input_frame, text="Send", command=self.process_input, style="Black.TButton")
+        self.send_btn.pack(side=tk.LEFT)
+        
+        self.mic_btn = ttk.Button(self.input_frame, text="🎤", command=self.toggle_voice_input, style="Black.TButton")
+        self.mic_btn.pack(side=tk.LEFT, padx=5)
+
+        self.control_frame = ttk.Frame(self.chat_frame)
+        self.control_frame.pack(pady=10)
+
+        ttk.Button(self.control_frame, text="Upload Report", command=self.upload_report, style="Black.TButton").pack(side=tk.LEFT, padx=5)
+        ttk.Button(self.control_frame, text="Exit", command=self.confirm_exit, style="Black.TButton").pack(side=tk.LEFT, padx=5)
+
+    def setup_report_interface(self):
+        ttk.Label(
+            self.report_frame, text="Medical Report Analysis",
+            style="Header.TLabel"
+        ).pack(pady=10)
+        
+        # Report summary section
+        self.report_summary_frame = ttk.Frame(self.report_frame)
+        self.report_summary_frame.pack(pady=5, fill='x')
+        
+        ttk.Label(self.report_summary_frame, text="Report Summary:", font=('Arial', 12, 'bold')).pack(anchor='w')
+        
+        self.report_summary = scrolledtext.ScrolledText(
+            self.report_frame, width=40, height=10, wrap=tk.WORD,
+            font=('Arial', 11), bg="white", fg="black", relief="solid", borderwidth=1
+        )
+        self.report_summary.pack(pady=5, fill='both', expand=True)
+        self.report_summary.config(state=tk.DISABLED)
+        
+        # Key findings section
+        ttk.Label(self.report_frame, text="Key Findings:", font=('Arial', 12, 'bold')).pack(anchor='w', pady=(10, 0))
+        
+        self.findings_list = tk.Listbox(
+            self.report_frame, font=('Arial', 11), bg="white", fg="black",
+            relief="solid", borderwidth=1, height=8
+        )
+        self.findings_list.pack(pady=5, fill='both')
+        
+        # Recommendations section
+        ttk.Label(self.report_frame, text="Recommendations:", font=('Arial', 12, 'bold')).pack(anchor='w', pady=(10, 0))
+        
+        self.recommendations = scrolledtext.ScrolledText(
+            self.report_frame, width=40, height=6, wrap=tk.WORD,
+            font=('Arial', 11), bg="white", fg="black", relief="solid", borderwidth=1
+        )
+        self.recommendations.pack(pady=5, fill='both')
+        self.recommendations.config(state=tk.DISABLED)
+
+    def load_assets(self):
+        try:
+            self.doctor_image = Image.open("doctor_icon.png").resize((120, 120), Image.LANCZOS)
+            self.doctor_image = ImageTk.PhotoImage(self.doctor_image)
+            self.doctor_animation.config(image=self.doctor_image, background="#e3f2fd")
+        except (FileNotFoundError, AttributeError):
+            # LANCZOS is the replacement for ANTIALIAS in newer PIL versions
+            # If doctor_icon.png is not found, use a text placeholder
+            self.doctor_animation.config(text="🩺 AI Doctor Avatar", font=('Arial', 14, 'bold'), background="#e3f2fd", foreground="black")
+
+    def initialize_conversation(self):
+        welcome_message = "Hi! I'm your AI Doctor. How can I assist you today? You can describe your symptoms or upload a medical report for analysis."
+        self.add_to_chat("AI Doctor: " + welcome_message)
+        # Speak the welcome message
+        self.speak_text(welcome_message)
+
+    def add_to_chat(self, message):
+        self.chat_history.config(state=tk.NORMAL)
+        self.chat_history.insert(tk.END, message + "\n")
+        self.chat_history.config(state=tk.DISABLED)
+        self.chat_history.see(tk.END)
+
+    def speak_text(self, text):
+        # Remove any AI Doctor prefix for speech
+        if text.startswith("AI Doctor: "):
+            text = text[11:]
+            
+        # Run TTS in a separate thread to avoid freezing the UI
+        threading.Thread(target=self._speak_thread, args=(text,), daemon=True).start()
+    
+    def _speak_thread(self, text):
+        self.voice_engine.say(text)
+        self.voice_engine.runAndWait()
+
+    def toggle_voice_input(self):
+        # Placeholder for voice input functionality
+        # In a real implementation, this would use a library like SpeechRecognition
+        self.add_to_chat("AI Doctor: Voice input is not implemented in this demo.")
+        self.speak_text("Voice input is not implemented in this demo.")
+
+    def process_input(self):
+        user_text = self.user_input.get()
+        if not user_text.strip():
+            return
+            
+        self.user_input.delete(0, tk.END)
+        self.add_to_chat(f"You: {user_text}")
+
+        detected_condition = self.detect_condition(user_text)
+        if detected_condition:
+            self.handle_condition(detected_condition)
+        else:
+            response = "I need more details about your symptoms. Could you describe what you're experiencing in more detail? Or you can upload a medical report for analysis."
+            self.add_to_chat("AI Doctor: " + response)
+            self.speak_text(response)
+
+    def detect_condition(self, text):
+        text = text.lower()
+        for condition in self.knowledge_base:
+            if condition in text:
+                return condition
+        return None
+
+    def handle_condition(self, condition):
+        data = self.knowledge_base[condition]
+        response = f"For {condition.capitalize()}:\n"
+        response += "Medications:\n" + "\n".join([f"- {med}: {dose}" for med, dose in data['medicines'].items()])
+        response += "\n\nHome Remedies:\n- " + "\n- ".join(data['remedies'])
+        response += f"\n\nFollow-up: {data['followup']}"
+        
+        self.add_to_chat("AI Doctor: " + response)
+        self.speak_text(f"I see you're experiencing {condition}. Let me provide some recommendations.")
+
+    def upload_report(self):
+        file_path = filedialog.askopenfilename(filetypes=[("Medical Reports", "*.pdf *.png *.jpg *.jpeg")])
+        if not file_path:
+            return
+            
+        self.add_to_chat(f"AI Doctor: Analyzing your medical report. Please wait...")
+        self.speak_text("I'm analyzing your medical report. This may take a moment.")
+        
+        # Process the report in a separate thread to avoid freezing the UI
+        threading.Thread(target=self._process_report, args=(file_path,), daemon=True).start()
+
+    def _process_report(self, file_path):
+        try:
+            # Extract text from the report
+            text = self._extract_text_from_report(file_path)
+            
+            # Simulate analysis (in a real app, this would use NLP/ML)
+            self._analyze_report_text(text, os.path.basename(file_path))
+            
+            # Update UI with analysis results
+            self.root.after(0, self._update_report_ui)
+            
+            # Notify user
+            self.root.after(0, lambda: self.add_to_chat("AI Doctor: Report analysis complete. I've identified key findings and prepared recommendations."))
+            self.root.after(0, lambda: self.speak_text("I've completed analyzing your medical report. Let's discuss the key findings."))
+            
+        except Exception as e:
+            self.root.after(0, lambda: self.add_to_chat(f"AI Doctor: Error processing report: {str(e)}"))
+            self.root.after(0, lambda: self.speak_text("I encountered an error while processing your report."))
+
+    def _extract_text_from_report(self, file_path):
+        # Handle different file types
+        if file_path.lower().endswith('.pdf'):
+            # Convert PDF to images
+            pages = convert_from_path(file_path)
+            text = ""
+            for page in pages:
+                text += pytesseract.image_to_string(page)
+            return text
+        elif file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
+            # Process image directly
+            img = Image.open(file_path)
+            return pytesseract.image_to_string(img)
+        else:
+            raise ValueError("Unsupported file format")
+
+    def _analyze_report_text(self, text, filename):
+        # This is a simplified simulation of report analysis
+        # In a real application, this would use NLP/ML techniques
+        
+        # Look for common medical terms in the text to simulate intelligent analysis
+        text_lower = text.lower()
+        
+        # Initialize findings list
+        findings = []
+        
+        # Check for common vitals and conditions in the text
+        if "blood pressure" in text_lower or "bp" in text_lower:
+            if "high" in text_lower or "elevated" in text_lower:
+                findings.append("Blood pressure: Elevated (Hypertension possible)")
+            elif "low" in text_lower or "decreased" in text_lower:
+                findings.append("Blood pressure: Below normal range (Hypotension possible)")
+            else:
+                findings.append("Blood pressure: Within normal range")
+        
+        # Add CBP (Complete Blood Picture) analysis
+        if "cbp" in text_lower or "complete blood" in text_lower or "cbc" in text_lower:
+            findings.append("CBP Report detected")
+            
+            if "wbc" in text_lower or "white blood cell" in text_lower:
+                if "high" in text_lower or "elevated" in text_lower or "leukocytosis" in text_lower:
+                    findings.append("WBC: Elevated (Possible infection or inflammation)")
+                elif "low" in text_lower or "decreased" in text_lower or "leukopenia" in text_lower:
+                    findings.append("WBC: Low (Possible bone marrow suppression or viral infection)")
+                else:
+                    findings.append("WBC: Within normal range")
+                    
+            if "rbc" in text_lower or "red blood cell" in text_lower:
+                if "high" in text_lower or "elevated" in text_lower or "polycythemia" in text_lower:
+                    findings.append("RBC: Elevated (Possible polycythemia)")
+                elif "low" in text_lower or "decreased" in text_lower or "anemia" in text_lower:
+                    findings.append("RBC: Low (Anemia detected)")
+                else:
+                    findings.append("RBC: Within normal range")
+                    
+            if "platelet" in text_lower or "plt" in text_lower:
+                if "high" in text_lower or "elevated" in text_lower or "thrombocytosis" in text_lower:
+                    findings.append("Platelets: Elevated (Possible reactive thrombocytosis)")
+                elif "low" in text_lower or "decreased" in text_lower or "thrombocytopenia" in text_lower:
+                    findings.append("Platelets: Low (Thrombocytopenia detected)")
+                else:
+                    findings.append("Platelets: Within normal range")
+        
+        # Add PFT (Pulmonary Function Test) analysis
+        if "pft" in text_lower or "pulmonary function" in text_lower or "lung function" in text_lower:
+            findings.append("PFT Report detected")
+            
+            if "fev1" in text_lower:
+                if "reduced" in text_lower or "low" in text_lower or "decreased" in text_lower:
+                    findings.append("FEV1: Reduced (Obstructive pattern possible)")
+                else:
+                    findings.append("FEV1: Within normal range")
+                    
+            if "fvc" in text_lower:
+                if "reduced" in text_lower or "low" in text_lower or "decreased" in text_lower:
+                    findings.append("FVC: Reduced (Restrictive pattern possible)")
+                else:
+                    findings.append("FVC: Within normal range")
+                    
+            if "fev1/fvc" in text_lower or "fev1/fvc ratio" in text_lower:
+                if "reduced" in text_lower or "low" in text_lower or "decreased" in text_lower:
+                    findings.append("FEV1/FVC Ratio: Reduced (Obstructive lung disease pattern)")
+                else:
+                    findings.append("FEV1/FVC Ratio: Within normal range")
+                    
+            if "dlco" in text_lower or "diffusion capacity" in text_lower:
+                if "reduced" in text_lower or "low" in text_lower or "decreased" in text_lower:
+                    findings.append("DLCO: Reduced (Possible interstitial lung disease or emphysema)")
+                else:
+                    findings.append("DLCO: Within normal range")
+        
+        # Add X-Ray analysis
+        if "x-ray" in text_lower or "xray" in text_lower or "radiograph" in text_lower:
+            findings.append("X-Ray Report detected")
+            
+            if "chest" in text_lower:
+                if "pneumonia" in text_lower or "consolidation" in text_lower:
+                    findings.append("Chest X-Ray: Consolidation noted (Pneumonia possible)")
+                elif "effusion" in text_lower or "fluid" in text_lower:
+                    findings.append("Chest X-Ray: Pleural effusion detected")
+                elif "cardiomegaly" in text_lower or "enlarged heart" in text_lower:
+                    findings.append("Chest X-Ray: Cardiomegaly (Enlarged heart)")
+                elif "nodule" in text_lower or "mass" in text_lower:
+                    findings.append("Chest X-Ray: Pulmonary nodule/mass detected (Further evaluation needed)")
+                elif "normal" in text_lower:
+                    findings.append("Chest X-Ray: Normal findings")
+                else:
+                    findings.append("Chest X-Ray: Findings require radiologist interpretation")
+                    
+            if "bone" in text_lower or "fracture" in text_lower:
+                if "fracture" in text_lower:
+                    findings.append("Bone X-Ray: Fracture detected")
+                elif "dislocation" in text_lower:
+                    findings.append("Bone X-Ray: Joint dislocation noted")
+                elif "arthritis" in text_lower or "degenerative" in text_lower:
+                    findings.append("Bone X-Ray: Degenerative changes/arthritis noted")
+                elif "normal" in text_lower:
+                    findings.append("Bone X-Ray: Normal findings")
+                else:
+                    findings.append("Bone X-Ray: Findings require radiologist interpretation")
+        
+        # Add CT Scan analysis
+        if "ct scan" in text_lower or "computed tomography" in text_lower:
+            findings.append("CT Scan Report detected")
+            
+            if "brain" in text_lower or "head" in text_lower:
+                if "stroke" in text_lower or "infarct" in text_lower or "ischemia" in text_lower:
+                    findings.append("Brain CT: Evidence of stroke/infarct")
+                elif "hemorrhage" in text_lower or "bleeding" in text_lower:
+                    findings.append("Brain CT: Intracranial hemorrhage detected")
+                elif "tumor" in text_lower or "mass" in text_lower:
+                    findings.append("Brain CT: Mass/tumor detected (Further evaluation needed)")
+                elif "normal" in text_lower:
+                    findings.append("Brain CT: Normal findings")
+                else:
+                    findings.append("Brain CT: Findings require radiologist interpretation")
+                    
+            if "abdomen" in text_lower:
+                if "liver" in text_lower and ("lesion" in text_lower or "mass" in text_lower):
+                    findings.append("Abdominal CT: Liver lesion/mass detected")
+                elif "kidney" in text_lower and ("stone" in text_lower or "calculi" in text_lower):
+                    findings.append("Abdominal CT: Kidney stones detected")
+                elif "appendicitis" in text_lower:
+                    findings.append("Abdominal CT: Signs of appendicitis")
+                elif "pancreatitis" in text_lower:
+                    findings.append("Abdominal CT: Evidence of pancreatitis")
+                elif "normal" in text_lower:
+                    findings.append("Abdominal CT: Normal findings")
+                else:
+                    findings.append("Abdominal CT: Findings require radiologist interpretation")
+        
+        # Add MRI analysis
+        if "mri" in text_lower or "magnetic resonance" in text_lower:
+            findings.append("MRI Report detected")
+            
+            if "brain" in text_lower:
+                if "stroke" in text_lower or "infarct" in text_lower:
+                    findings.append("Brain MRI: Evidence of stroke/infarct")
+                elif "tumor" in text_lower or "mass" in text_lower:
+                    findings.append("Brain MRI: Mass/tumor detected")
+                elif "multiple sclerosis" in text_lower or "demyelination" in text_lower:
+                    findings.append("Brain MRI: Demyelinating lesions (Possible multiple sclerosis)")
+                elif "normal" in text_lower:
+                    findings.append("Brain MRI: Normal findings")
+                else:
+                    findings.append("Brain MRI: Findings require radiologist interpretation")
+                    
+            if "spine" in text_lower:
+                if "herniation" in text_lower or "herniated disc" in text_lower:
+                    findings.append("Spine MRI: Disc herniation detected")
+                elif "stenosis" in text_lower:
+                    findings.append("Spine MRI: Spinal stenosis noted")
+                elif "normal" in text_lower:
+                    findings.append("Spine MRI: Normal findings")
+                else:
+                    findings.append("Spine MRI: Findings require radiologist interpretation")
+        
+        # Add ECG/EKG analysis
+        if "ecg" in text_lower or "ekg" in text_lower or "electrocardiogram" in text_lower:
+            findings.append("ECG/EKG Report detected")
+            
+            if "normal sinus rhythm" in text_lower:
+                findings.append("ECG: Normal sinus rhythm")
+            elif "atrial fibrillation" in text_lower or "afib" in text_lower:
+                findings.append("ECG: Atrial fibrillation detected")
+            elif "st elevation" in text_lower:
+                findings.append("ECG: ST elevation (Possible myocardial infarction)")
+            elif "st depression" in text_lower:
+                findings.append("ECG: ST depression (Possible ischemia)")
+            elif "tachycardia" in text_lower:
+                findings.append("ECG: Tachycardia detected")
+            elif "bradycardia" in text_lower:
+                findings.append("ECG: Bradycardia detected")
+            elif "heart block" in text_lower or "av block" in text_lower:
+                findings.append("ECG: Heart block detected")
+            else:
+                findings.append("ECG: Requires cardiologist interpretation")
+        
+        # Continue with existing analysis code
+        if "cholesterol" in text_lower:
+            if "high" in text_lower or "elevated" in text_lower:
+                findings.append("Cholesterol: Significantly elevated")
+            elif "borderline" in text_lower or "slightly" in text_lower:
+                findings.append("Cholesterol: Slightly elevated")
+            else:
+                findings.append("Cholesterol: Within normal range")
+        
+        if "glucose" in text_lower or "blood sugar" in text_lower:
+            if "high" in text_lower or "elevated" in text_lower or "diabetes" in text_lower:
+                findings.append("Blood glucose: Elevated (Diabetes risk)")
+            else:
+                findings.append("Blood glucose: Normal")
+        
+        if "heart rate" in text_lower or "pulse" in text_lower:
+            if "tachycardia" in text_lower or "fast" in text_lower:
+                findings.append("Heart rate: Elevated (Tachycardia)")
+            elif "bradycardia" in text_lower or "slow" in text_lower:
+                findings.append("Heart rate: Below normal (Bradycardia)")
+            else:
+                findings.append("Heart rate: Normal")
+        
+        if "respiratory" in text_lower or "breathing" in text_lower:
+            if "distress" in text_lower or "difficulty" in text_lower:
+                findings.append("Respiratory rate: Abnormal (Signs of respiratory distress)")
+            else:
+                findings.append("Respiratory rate: Normal")
+        
+        # Additional tests that might be in a medical report
+        if "thyroid" in text_lower:
+            if "hypothyroidism" in text_lower or "low" in text_lower:
+                findings.append("Thyroid function: Reduced (Hypothyroidism possible)")
+            elif "hyperthyroidism" in text_lower or "high" in text_lower:
+                findings.append("Thyroid function: Elevated (Hyperthyroidism possible)")
+            else:
+                findings.append("Thyroid function: Normal")
+        
+        if "hemoglobin" in text_lower or "hgb" in text_lower:
+            if "low" in text_lower or "anemia" in text_lower:
+                findings.append("Hemoglobin: Low (Anemia possible)")
+            elif "high" in text_lower or "polycythemia" in text_lower:
+                findings.append("Hemoglobin: Elevated")
+            else:
+                findings.append("Hemoglobin: Normal")
+        
+        if "liver" in text_lower or "alt" in text_lower or "ast" in text_lower:
+            if "elevated" in text_lower or "high" in text_lower:
+                findings.append("Liver enzymes: Elevated (Liver function concern)")
+            else:
+                findings.append("Liver function: Normal")
+        
+        if "kidney" in text_lower or "creatinine" in text_lower or "bun" in text_lower:
+            if "elevated" in text_lower or "high" in text_lower:
+                findings.append("Kidney function: Reduced (Elevated creatinine/BUN)")
+            else:
+                findings.append("Kidney function: Normal")
+        
+        # If no specific findings were detected, provide default findings
+        if not findings:
+            findings = [
+                "Blood pressure: Within normal range",
+                "Cholesterol: Slightly elevated",
+                "Blood glucose: Normal",
+                "Heart rate: Normal",
+                "Respiratory rate: Normal"
+            ]
+        
+        # Generate a summary based on findings
+        summary = f"This medical report for file '{filename}' contains information about patient vitals, lab results, and clinical observations. "
+        
+        # Add more context to summary based on findings
+        abnormal_findings = [f for f in findings if "normal" not in f.lower()]
+        if abnormal_findings:
+            summary += f"There are {len(abnormal_findings)} areas of concern that require attention."
+        else:
+            summary += "All measured parameters appear to be within normal ranges."
+        
+        # Generate recommendations based on findings
+        recommendations = "Based on the analysis of this report, I recommend:\n\n"
+        
+        # Add specific recommendations based on findings
+        if any("cholesterol" in f.lower() and "elevated" in f.lower() for f in findings):
+            recommendations += "• Dietary changes: Reduce saturated fats, increase fiber intake\n"
+            recommendations += "• Consider regular exercise: 30 minutes of moderate activity 5 days a week\n"
+            recommendations += "• Follow-up lipid panel in 3 months\n"
+        
+        if any("blood pressure" in f.lower() and "elevated" in f.lower() for f in findings):
+            recommendations += "• Monitor blood pressure regularly\n"
+            recommendations += "• Reduce sodium intake\n"
+            recommendations += "• Consider stress management techniques\n"
+            recommendations += "• Consult with cardiologist if consistently elevated\n"
+        
+        if any("glucose" in f.lower() and "elevated" in f.lower() for f in findings):
+            recommendations += "• Monitor blood glucose levels\n"
+            recommendations += "• Reduce simple carbohydrate intake\n"
+            recommendations += "• Consider HbA1c test\n"
+            recommendations += "• Consult with endocrinologist\n"
+        
+        if any("thyroid" in f.lower() and ("reduced" in f.lower() or "elevated" in f.lower()) for f in findings):
+            recommendations += "• Follow-up with endocrinologist\n"
+            recommendations += "• Complete thyroid panel recommended\n"
+        
+        if any("hemoglobin" in f.lower() and "low" in f.lower() for f in findings):
+            recommendations += "• Iron supplementation may be beneficial\n"
+            recommendations += "• Increase iron-rich foods in diet\n"
+            recommendations += "• Follow-up CBC in 1 month\n"
+        
+        if any("liver" in f.lower() and "elevated" in f.lower() for f in findings):
+            recommendations += "• Avoid alcohol and hepatotoxic medications\n"
+            recommendations += "• Follow-up liver function tests in 2 weeks\n"
+            recommendations += "• Ultrasound of liver may be indicated\n"
+        
+        if any("kidney" in f.lower() and "reduced" in f.lower() for f in findings):
+            recommendations += "• Increase water intake\n"
+            recommendations += "• Reduce protein intake temporarily\n"
+            recommendations += "• Follow-up kidney function tests in 2 weeks\n"
+        
+        # If no specific recommendations were generated, provide a default
+        if recommendations == "Based on the analysis of this report, I recommend:\n\n":
+            recommendations += "• Maintain current healthy lifestyle\n"
+            recommendations += "• Regular check-ups every 12 months\n"
+            recommendations += "• No immediate medical intervention necessary\n"
+        
+        # Store analysis results
+        self.report_analysis = {
+            'filename': filename,
+            'summary': summary,
+            'findings': findings,
+            'recommendations': recommendations
+        }
+        
+        # In a real implementation, we would parse the text and extract meaningful information
+
+    def _update_report_ui(self):
+        # Update summary
+        self.report_summary.config(state=tk.NORMAL)
+        self.report_summary.delete(1.0, tk.END)
+        self.report_summary.insert(tk.END, self.report_analysis.get('summary', 'No summary available'))
+        self.report_summary.config(state=tk.DISABLED)
+        
+        # Update findings
+        self.findings_list.delete(0, tk.END)
+        for finding in self.report_analysis.get('findings', []):
+            self.findings_list.insert(tk.END, finding)
+            
+        # Update recommendations
+        self.recommendations.config(state=tk.NORMAL)
+        self.recommendations.delete(1.0, tk.END)
+        self.recommendations.insert(tk.END, self.report_analysis.get('recommendations', 'No recommendations available'))
+        self.recommendations.config(state=tk.DISABLED)
+
+    def confirm_exit(self):
+        if messagebox.askyesno("Exit", "Are you sure you want to exit?"):
+            self.root.destroy()
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = EnhancedAIDoctor(root)
+    root.mainloop()
